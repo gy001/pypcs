@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "pypcs"
+version = "0.1.0"
+description = ""
+authors = ["Yu Guo <yu.guo@secbit.io>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+py-ecc = "^6.0.0"
+galois = "^0.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
