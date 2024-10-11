@@ -135,22 +135,86 @@ class Verifier:
         )
 
 
-def run_addition_proof(a: Fr, b: Fr, pp: PedersenParams) -> bool:
-    prover = Prover(a, b, pp)
-    verifier = Verifier(prover.A, prover.B, prover.C, pp)
-
+def run_addition_proof(prover: Prover, verifier: Verifier) -> bool:
     R_A, R_B, R_C = prover.round1()
     e = verifier.round2()
     z_a, z_b, z_tau_a, z_tau_b, z_tau_c = prover.round3(e)
     return verifier.verify(e, R_A, R_B, R_C, z_a, z_b, z_tau_a, z_tau_b, z_tau_c)
 
 
+def simulate(A: G1Point, B: G1Point, C: G1Point, verifier: Verifier) -> Fr:
+    pp = verifier.pp
+
+    # 1 simulator does Round 1 of prover
+    # Actually we don't need to do anything, we just need to use verifier's challenge
+    # to generate fake the proof
+
+    # 2. simulator invoke Round 2 of verifier
+    st = verifier.rnd_gen.getstate()
+    e = verifier.round2()
+
+    # 3. simulator does Round 3 of prover
+    # 3.1 generate fake z_a
+    z_a_star = Fr.rand(random.Random("addition-prrof-z"))
+    z_tau_a_star = Fr.rand(random.Random("addition-prrof-z-rho"))
+    Z_A_star = commit(z_a_star, z_tau_a_star, pp)
+    R_A_star = Z_A_star - ec_mul(A, e)
+    # 3.2 generate fake z_b
+    z_b_star = Fr.rand(random.Random("addition-prrof-z"))
+    z_tau_b_star = Fr.rand(random.Random("addition-prrof-z-rho"))
+    Z_B_star = commit(z_b_star, z_tau_b_star, pp)
+    R_B_star = Z_B_star - ec_mul(B, e)
+    # 3.3 generate fake z_c
+    z_c_star = z_a_star + z_b_star
+    z_tau_c_star = Fr.rand(random.Random("addition-prrof-z-rho"))
+    Z_C_star = commit(z_c_star, z_tau_c_star, pp)
+    R_C_star = Z_C_star - ec_mul(C, e)
+
+    verifier.rnd_gen.setstate(st)
+    e_star = verifier.round2()
+    assert e == e_star
+
+    return verifier.verify(
+        e,
+        R_A_star,
+        R_B_star,
+        R_C_star,
+        z_a_star,
+        z_b_star,
+        z_tau_a_star,
+        z_tau_b_star,
+        z_tau_c_star,
+    )
+
+def extract(prover: Prover) -> tuple[Fr, Fr]:
+    rng = random.Random("addition-proof-extract")
+
+    R_A, R_B, R_C = prover.round1()
+    
+    e_1 = Fr.rand(rng)
+    e_2 = Fr.rand(rng)
+    
+    z_a_1, z_b_1, z_tau_a_1, z_tau_b_1, z_tau_c_1 = prover.round3(e_1)
+    z_a_2, z_b_2, z_tau_a_2, z_tau_b_2, z_tau_c_2 = prover.round3(e_2)
+    
+    a = (z_a_2 - z_a_1) / (e_2 - e_1)
+    b = (z_b_2 - z_b_1) / (e_2 - e_1)
+    tau_a = (z_tau_a_2 - z_tau_a_1) / (e_2 - e_1)
+    tau_b = (z_tau_b_2 - z_tau_b_1) / (e_2 - e_1)
+    tau_c = (z_tau_c_2 - z_tau_c_1) / (e_2 - e_1)
+    
+    return a, b, tau_a, tau_b, tau_c
+
+
 if __name__ == "__main__":
     pedersen_params = PedersenParams()
     a = Fr(31)
-    b = Fr(19)
-    print(f"?: {run_addition_proof(a, b, pedersen_params)}")
-    # print(
-    #     f"?: {simulate(commit(sk, rho, pedersen_params), Verifier(commit(sk, rho, pedersen_params), pedersen_params))}"
-    # )
-    # print(f"?: {extract(Prover(sk, rho))}")
+    b = Fr(17)
+    prover = Prover(a, b, pedersen_params)
+    verifier = Verifier(prover.A, prover.B, prover.C, pedersen_params)
+
+    print(f"?: {run_addition_proof(prover, verifier)}")
+    print(
+        f"?: {simulate(prover.A, prover.B, prover.C, verifier)}"
+    )
+    print(f"?: {extract(prover)}")
