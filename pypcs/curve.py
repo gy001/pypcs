@@ -1,4 +1,4 @@
-from typing import NewType, Generic, TypeVar
+from typing import NewType, Generic, TypeVar, Optional
 from random import randint, seed, Random
 # from galois import GF
 
@@ -16,7 +16,9 @@ class Fr(FQ):
     field_modulus = bn128.curve_order
 
     @classmethod
-    def rand(cls, rndg: Random) -> "Fr":
+    def rand(cls, rndg: Optional[Random] = None) -> "Fr":
+        if rndg is None:
+            return cls(randint(1, cls.field_modulus - 1))
         return cls(rndg.randint(1, cls.field_modulus - 1))
     
     @classmethod
