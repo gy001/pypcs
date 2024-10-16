@@ -10,16 +10,11 @@ def setup() -> tuple[G1Point, G1Point]:
     return G1Point.ec_gen_group1(), ec_mul(G1Point.ec_gen_group1(), s)
 
 # Pedersen Commitment 
-#  [a]
-
 def commit(pp: tuple[G1Point, G1Point], a: Fr, r: Fr) -> G1Point:
     """
         Perfectly hiding
         Computationally binding
     """
-
-
-    # print(f"a={a}")
     return ec_mul(pp[0], a) + ec_mul(pp[1], r)
 
 def open(pp: tuple[G1Point, G1Point], cm: G1Point, a: Fr, r: Fr) -> bool:
