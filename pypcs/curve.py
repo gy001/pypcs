@@ -4,6 +4,9 @@ from random import randint, seed, Random
 
 from py_ecc.fields.field_elements import FQ
 import py_ecc.bn128 as bn128
+from py_ecc.utils import (
+    prime_field_inv,
+)
 
 primitive_root = 5
 
@@ -24,6 +27,14 @@ class Fr(FQ):
     @classmethod
     def rands(cls, rndg: Random, n: int) -> list["Fr"]:
         return [cls(rndg.randint(1, cls.field_modulus - 1)) for _ in range(n)]
+    
+    @classmethod
+    def from_bytes(cls, b: bytes) -> "Fr":
+        i = int.from_bytes(b, "big")
+        return cls(i)
+    
+    def inv(self) -> "Fr":
+        return Fr(prime_field_inv(self.n, self.field_modulus))
 
 Fp = NewType("BaseField", bn128.FQ)
 
