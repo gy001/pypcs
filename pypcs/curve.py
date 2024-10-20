@@ -35,6 +35,13 @@ class Fr(FQ):
     
     def inv(self) -> "Fr":
         return Fr(prime_field_inv(self.n, self.field_modulus))
+    
+    def __str__(self) -> str:
+        k = self.field_modulus // 2
+        if self.n < k:
+            return f"{self.n}"
+        else:
+            return f"-{self.field_modulus - self.n}"
 
 Fp = NewType("BaseField", bn128.FQ)
 

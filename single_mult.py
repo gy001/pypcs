@@ -1,18 +1,21 @@
+#!/usr/bin/env python3
+
+# WARNING: This implementation may contain bugs and has not been audited. 
+# It is only for educational purposes. DO NOT use it in production.
+
 from pypcs.curve import Fp, Fr, ec_mul, G1Point
 import random
+from pedersen import PedersenCommitment
 
-def setup() -> tuple[G1Point, G1Point]:
-    s = Fr.rand(random.Random("pedersen-commitment-setup"))
-    return G1Point.ec_gen_group1(), ec_mul(G1Point.ec_gen_group1(), s)
+cms = PedersenCommitment.setup(20)
 
-def commit(pp: tuple[G1Point, G1Point], a: Fr, r: Fr) -> G1Point:
-    # print(f"a={a}")
-    return ec_mul(pp[0], a) + ec_mul(pp[1], r)
-
-def open(pp: tuple[G1Point, G1Point], cm: G1Point, a: Fr, r: Fr) -> bool:
-    return cm == commit(pp, a, r)
-
-pp = setup()
+# Implement a single multiplication argument (∑-protocol)
+#
+# The scheme is from Section 5.3 of [BG12]: 
+#   - Efficient Zero-Knowledge Argument for Correctness of a Shuffle.
+#   - Stephanie Bayer and Jens Groth: 
+#   - http://www.cs.ucl.ac.uk/staff/J.Groth/MinimalShuffle.pdf
+#
 
 class Prover:
     a: Fr
@@ -30,9 +33,9 @@ class Prover:
         self.a_blinder = Fr.rand(self.rnd_gen)
         self.b_blinder = Fr.rand(self.rnd_gen)
         self.c_blinder = Fr.rand(self.rnd_gen)
-        self.A = commit(pp, a, self.a_blinder)
-        self.B = commit(pp, b, self.b_blinder)
-        self.C = commit(pp, c, self.c_blinder)
+        self.A = cms.commit_with_blinder([a], self.a_blinder)
+        self.B = cms.commit_with_blinder([b], self.b_blinder)
+        self.C = cms.commit_with_blinder([c], self.c_blinder)
 
     def round1(self) -> tuple[G1Point, G1Point, G1Point]:
         ra = Fr.rand(self.rnd_gen)
@@ -41,9 +44,9 @@ class Prover:
         rb_r = Fr.rand(self.rnd_gen)
         rt = Fr.rand(self.rnd_gen)
         
-        Ra = commit(pp, ra, ra_r)
-        Rb = commit(pp, rb, rb_r)
-        Rt = ec_mul(self.B, ra) + commit(pp, Fr.zero(), -rt)
+        Ra = cms.commit_with_blinder([ra], ra_r)
+        Rb = cms.commit_with_blinder([rb], rb_r)
+        Rt = ec_mul(self.B, ra) + cms.commit_with_blinder([Fr.zero()], -rt)
         self.r = (ra, rb, rt, ra_r, rb_r)
         return (Ra, Rb, Rt)
 
@@ -74,9 +77,9 @@ class Verifier:
         Ra = R[0]
         Rb = R[1]
         Rt = R[2]
-        cond0 = commit(pp, zs[0], zs[2]) ==  ec_mul(self.A, e) + Ra 
-        cond1 = commit(pp, zs[1], zs[3]) ==  ec_mul(self.B, e) + Rb 
-        cond2 = ec_mul(self.B, zs[0]) ==  ec_mul(self.C, e) + Rt + commit(pp, Fr.zero(), zs[4])
+        cond0 = cms.commit_with_blinder([zs[0]], zs[2]) ==  ec_mul(self.A, e) + Ra 
+        cond1 = cms.commit_with_blinder([zs[1]], zs[3]) ==  ec_mul(self.B, e) + Rb 
+        cond2 = ec_mul(self.B, zs[0]) ==  ec_mul(self.C, e) + Rt + cms.commit_with_blinder([Fr.zero()], zs[4])
         print(f"cond0: {cond0}")
         print(f"cond1: {cond1}")
         print(f"cond2: {cond2}")
@@ -91,38 +94,10 @@ def run_schnorr(prover: Prover, verifier: Verifier) -> bool:
     return verifier.verify(R, c, z)
 
 def simulate(prover_pk: G1Point, verifier: Verifier) -> Fr:
-
-    r = Fr(1)
-    R = commit(pp, r, r)
-
-    st = verifier.rnd_gen.getstate()
-    c = verifier.round2(R)
-
-    rng = random.Random("schnorr-sim")
-    z_star_0 = Fr.rand(rng)
-    z_star_1 = Fr.rand(rng)
-    Z_star = commit(pp, z_star_0, z_star_1)
-
-    R_star = Z_star - ec_mul(prover_pk, c)
-    verifier.rnd_gen.setstate(st)
-    c_star = verifier.round2(R_star)
-
-    assert c == c_star
-
-    return verifier.verify(R_star, c, (z_star_0, z_star_1))
+    raise NotImplementedError("Not implemented")
 
 def extract(prover: Prover) -> Fr:
-    rng = random.Random("schnorr-extract")
-
-
-    R = prover.round1()
-    c = Fr.rand(rng)
-    z = prover.round3(c)
-    c_star = Fr.rand(rng)
-    z_star = prover.round3(c_star)
-    sk = (z_star[0] - z[0]) / (c_star - c)
-    return sk
-
+    raise NotImplementedError("Not implemented")
 
 if __name__ == "__main__":
     a = Fr(4)
@@ -137,6 +112,6 @@ if __name__ == "__main__":
 
     print(f"protocol? : {run_schnorr(prover, verifier)}")
 
+    # TODO: implement simulator and extractor
     # print(f"simulator? : {simulate(prover.pk, verifier)}")
-
     # print(f"extractor? : {extract(Prover(sk))}")
