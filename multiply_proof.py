@@ -196,23 +196,33 @@ def simulate(A: G1Point, B: G1Point, C: G1Point, verifier: Verifier) -> Fr:
     )
 
 
-def extract(prover: Prover) -> tuple[Fr, Fr]:
+def extract(prover: Prover) -> tuple[Fr, Fr, Fr]:
     rng = random.Random("multiply-proof-extract")
 
     R_A, R_B, E_0, E_1 = prover.round1()
 
     e_1 = Fr.rand(rng)
     e_2 = Fr.rand(rng)
+    e_3 = Fr.rand(rng)
 
     z_a_1, z_b_1, z_tau_a_1, z_tau_b_1, z_tau_c_1 = prover.round3(e_1)
     z_a_2, z_b_2, z_tau_a_2, z_tau_b_2, z_tau_c_2 = prover.round3(e_2)
+    z_a_3, z_b_3, z_tau_a_3, z_tau_b_3, z_tau_c_3 = prover.round3(e_3)
 
     a = (z_a_2 - z_a_1) / (e_2 - e_1)
     b = (z_b_2 - z_b_1) / (e_2 - e_1)
     tau_a = (z_tau_a_2 - z_tau_a_1) / (e_2 - e_1)
     tau_b = (z_tau_b_2 - z_tau_b_1) / (e_2 - e_1)
 
-    return a, b, tau_a, tau_b
+    # (e_1 + e_2) * (a + b) + (r_a * b + r_b * a) = (z_a_1 * z_b_1 - z_a_2 * z_b_2) / (e_1 - e_2)
+    # (e_1 + e_3) * (a + b) + (r_a * b + r_b * a) = (z_a_1 * z_b_1 - z_a_3 * z_b_3) / (e_1 - e_3)
+    # (e_2 - e_3) * (a + b) = (z_a_1 * z_b_1 - z_a_2 * z_b_2) / (e_1 - e_2) - (z_a_1 * z_b_1 - z_a_3 * z_b_3) / (e_1 - e_3)
+    c = (
+        (z_a_1 * z_b_1 - z_a_2 * z_b_2) / (e_1 - e_2)
+        - (z_a_1 * z_b_1 - z_a_3 * z_b_3) / (e_1 - e_3)
+    ) / (e_2 - e_3)
+
+    return a, b, tau_a, tau_b, c
 
 
 if __name__ == "__main__":
