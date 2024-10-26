@@ -107,14 +107,40 @@ class IPA_PCS:
         PLR = []
         rho = rho_a
 
-        # Round 2:   PL, PR, ->
-        round = 0
-        half = n // 2
+        def recursive_split_and_fold(G: list[G1Point], vec_a: list[Fr], vec_b: list[Fr], rho: Fr, P: G1Point) -> IPA_Argument:
+            if len(vec_a) == 1:
+                assert len(vec_a) == len(vec_b) == len(G) == 1, "EROR: len(vec_a) and len(vec_b) should be 1"
+                a0 = vec_a[0]
+                b0 = vec_b[0]
+                G0 = G[0]
 
-        while half > 0:
-            if debug:
-                print(f"prove> round: {round}")
-            round += 1
+                # Round 4:  R -> 
+                G_new = G0 + ec_mul(Ugamma, b0)
+                r, rho_r = Fr.rands(rng, 2)
+                R = ec_mul(G_new, r) + ec_mul(H, rho_r)
+                tr.append_message(b"R", str(R).encode())
+
+                # Round 5:  zeta <~ Fr
+                zeta = Fr.from_bytes(tr.challenge_bytes(b"zeta", 1))
+                if debug:
+                    print(f"prove> zeta: {zeta}")
+
+                # Round 6:  z ->  
+                z = r + zeta * a0
+                z_r = rho_r + zeta * rho
+            
+                # Debug
+                if debug:
+                    lhs = self.pcs.commit_with_pp([G_new], [z])
+                    rhs = P + ec_mul(G_new, r) + ec_mul(P, zeta)
+                    if lhs == rhs:
+                        print(f"prove> [z]_(G_new) == pcs.commit_with_pp(G, vec_z) ok ")
+                    else:
+                        print(f"prove> Z == pcs.commit_with_pp(G, vec_z) failed ")
+
+                return (n, PLR, R, z, z_r)
+
+            half = len(vec_a) // 2
             G1 = G[:half]
             G2 = G[half:]
             as1 = vec_a[:half]
@@ -123,6 +149,7 @@ class IPA_PCS:
             bs2 = vec_b[half:]
             rho_L, rho_R = Fr.rands(rng, 2)
 
+            # Round 2:   PL, PR, ->
             PL = self.pcs.commit_with_pp(G1, as2) + ec_mul(Ugamma, ipa(as2, bs1)) + ec_mul(H, rho_L)
             PR = self.pcs.commit_with_pp(G2, as1) + ec_mul(Ugamma, ipa(as1, bs2)) + ec_mul(H, rho_R)
             PLR.insert(0, (PL, PR))
@@ -137,7 +164,7 @@ class IPA_PCS:
             vec_a = [as1[i] + as2[i] * mu for i in range(half)]
             vec_b = [bs1[i] + bs2[i] * mu.inv() for i in range(half)]
             rho += rho_L * mu + rho_R * mu.inv()
-
+            
             G = [G1[i] + ec_mul(G2[i], mu.inv()) for i in range(half)]
 
             # Debug
@@ -148,38 +175,12 @@ class IPA_PCS:
                     print(f"prove> [vec_a]_(G) + [<vec_a, vec_b>]_(H) == P + mu*PL + mu^(-1)*PR ok ")
                 else:
                     print(f"prove> [vec_a]_(G) + [<vec_a, vec_b>]_(H) == P + mu*PL + mu^(-1)*PR failed ")
-            half = half // 2
+            
+            return recursive_split_and_fold(G, vec_a, vec_b, rho, P)
+        
+        return recursive_split_and_fold(G, vec_a, vec_b, rho, P)
 
-        assert len(vec_a) == len(vec_b) == len(G) == 1, "EROR: len(vec_a) and len(vec_b) should be 1"
-        a0 = vec_a[0]
-        b0 = vec_b[0]
-        G0 = G[0]
-
-        # Round 4:  R -> 
-        G_new = G0 + ec_mul(Ugamma, b0)
-        r, rho_r = Fr.rands(rng, 2)
-        R = ec_mul(G_new, r) + ec_mul(H, rho_r)
-        tr.append_message(b"R", str(R).encode())
-
-        # Round 5:  zeta <~ Fr
-        zeta = Fr.from_bytes(tr.challenge_bytes(b"zeta", 1))
-        if debug:
-            print(f"prove> zeta: {zeta}")
-
-        # Round 6:  z ->  
-        z = r + zeta * a0
-        z_r = rho_r + zeta * rho
-    
-        # Debug
-        if debug:
-            lhs = self.pcs.commit_with_pp([G_new], [z])
-            rhs = P + ec_mul(G_new, r) + ec_mul(P, zeta)
-            if lhs == rhs:
-                print(f"prove> [z]_(G_new) == pcs.commit_with_pp(G, vec_z) ok ")
-            else:
-                print(f"prove> Z == pcs.commit_with_pp(G, vec_z) failed ")
-
-        return (n, PLR, R, z, z_r)
+        
 
     def inner_product_verify(self, a_cm: G1Point, vec_b: Fr, c: Fr, arg: IPA_Argument, tr: MerlinTranscript, debug=False) -> bool:
         """
