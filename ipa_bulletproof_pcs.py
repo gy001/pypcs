@@ -107,14 +107,40 @@ class IPA_PCS:
         PLR = []
         rho = rho_a
 
-        # Round 2:   PL, PR, ->
-        round = 0
-        half = n // 2
+        def recursive_split_and_fold(G: list[G1Point], vec_a: list[Fr], vec_b: list[Fr], rho: Fr, P: G1Point) -> IPA_Argument:
+            if len(vec_a) == 1:
+                assert len(vec_a) == len(vec_b) == len(G) == 1, "EROR: len(vec_a) and len(vec_b) should be 1"
+                a0 = vec_a[0]
+                b0 = vec_b[0]
+                G0 = G[0]
 
-        while half > 0:
-            if debug:
-                print(f"prove> round: {round}")
-            round += 1
+                # Round 4:  R -> 
+                G_new = G0 + ec_mul(Ugamma, b0)
+                r, rho_r = Fr.rands(rng, 2)
+                R = ec_mul(G_new, r) + ec_mul(H, rho_r)
+                tr.append_message(b"R", str(R).encode())
+
+                # Round 5:  zeta <~ Fr
+                zeta = Fr.from_bytes(tr.challenge_bytes(b"zeta", 1))
+                if debug:
+                    print(f"prove> zeta: {zeta}")
+
+                # Round 6:  z ->  
+                z = r + zeta * a0
+                z_r = rho_r + zeta * rho
+            
+                # Debug
+                if debug:
+                    lhs = self.pcs.commit_with_pp([G_new], [z])
+                    rhs = P + ec_mul(G_new, r) + ec_mul(P, zeta)
+                    if lhs == rhs:
+                        print(f"prove> [z]_(G_new) == pcs.commit_with_pp(G, vec_z) ok ")
+                    else:
+                        print(f"prove> Z == pcs.commit_with_pp(G, vec_z) failed ")
+
+                return (n, PLR, R, z, z_r)
+
+            half = len(vec_a) // 2
             G1 = G[:half]
             G2 = G[half:]
             as1 = vec_a[:half]
@@ -123,6 +149,7 @@ class IPA_PCS:
             bs2 = vec_b[half:]
             rho_L, rho_R = Fr.rands(rng, 2)
 
+            # Round 2:   PL, PR, ->
             PL = self.pcs.commit_with_pp(G1, as2) + ec_mul(Ugamma, ipa(as2, bs1)) + ec_mul(H, rho_L)
             PR = self.pcs.commit_with_pp(G2, as1) + ec_mul(Ugamma, ipa(as1, bs2)) + ec_mul(H, rho_R)
             PLR.insert(0, (PL, PR))
@@ -137,7 +164,7 @@ class IPA_PCS:
             vec_a = [as1[i] + as2[i] * mu for i in range(half)]
             vec_b = [bs1[i] + bs2[i] * mu.inv() for i in range(half)]
             rho += rho_L * mu + rho_R * mu.inv()
-
+            
             G = [G1[i] + ec_mul(G2[i], mu.inv()) for i in range(half)]
 
             # Debug
@@ -148,38 +175,129 @@ class IPA_PCS:
                     print(f"prove> [vec_a]_(G) + [<vec_a, vec_b>]_(H) == P + mu*PL + mu^(-1)*PR ok ")
                 else:
                     print(f"prove> [vec_a]_(G) + [<vec_a, vec_b>]_(H) == P + mu*PL + mu^(-1)*PR failed ")
-            half = half // 2
+            
+            return recursive_split_and_fold(G, vec_a, vec_b, rho, P)
+        
+        return recursive_split_and_fold(G, vec_a, vec_b, rho, P)
 
-        assert len(vec_a) == len(vec_b) == len(G) == 1, "EROR: len(vec_a) and len(vec_b) should be 1"
-        a0 = vec_a[0]
-        b0 = vec_b[0]
-        G0 = G[0]
+    def inner_product_extract(self, \
+            a_cm: G1Point, vec_b: list[Fr], c: Fr, vec_a: list[Fr], rho_a: Fr, \
+            tr: MerlinTranscript, 
+            debug=False) \
+            -> list[Fr]:
+        """
+        Prove an inner product of two vectors is correct.
 
-        # Round 4:  R -> 
-        G_new = G0 + ec_mul(Ugamma, b0)
-        r, rho_r = Fr.rands(rng, 2)
-        R = ec_mul(G_new, r) + ec_mul(H, rho_r)
-        tr.append_message(b"R", str(R).encode())
+            <(a0, a1,...,a_{n-1}), (b0, b1,...,b_{n-1})> = c
+        
+        Args:
+            a_cm: the commitment to the vector a
+            vec_b: the vector b
+            c: the challenge scalar
+            vec_a: the vector a
+            rho_a: the blinding factor for the commitment to vec_a
+            tr: the Merlin transcript to use for the proof
+            debug: whether to print debug information
+        Returns:
+            an IPA_Argument tuple
+        """
+        n = len(vec_a)
+        assert len(self.pcs.pp[0]) >= 2 * n + 1, f"EROR: len(pcs.pp) = {len(self.pcs.pp[0])}, while len(vec_a) = {len(vec_a)}"
+        assert len(vec_b) == n, f"EROR: len(vec_b) = {len(vec_b)}, while len(vec_a) = {len(vec_a)}"
 
-        # Round 5:  zeta <~ Fr
-        zeta = Fr.from_bytes(tr.challenge_bytes(b"zeta", 1))
         if debug:
-            print(f"prove> zeta: {zeta}")
+            print(f"prove> n: {n}")
+        
+        rng = random.Random(b"schnorr-1folding-commit")
 
-        # Round 6:  z ->  
-        z = r + zeta * a0
-        z_r = rho_r + zeta * rho
-    
-        # Debug
-        if debug:
-            lhs = self.pcs.commit_with_pp([G_new], [z])
-            rhs = P + ec_mul(G_new, r) + ec_mul(P, zeta)
-            if lhs == rhs:
-                print(f"prove> [z]_(G_new) == pcs.commit_with_pp(G, vec_z) ok ")
-            else:
-                print(f"prove> Z == pcs.commit_with_pp(G, vec_z) failed ")
+        G = self.pcs.pp[0][:n]
+        U = self.pcs.pp[0][-1]
+        H = self.pcs.pp[1]
 
-        return (n, PLR, R, z, z_r)
+        tr.append_message(b"a_cm", str(a_cm).encode())
+        tr.append_message(b"vec_b", str(vec_b).encode())
+        tr.append_message(b"c", str(c).encode())
+
+        # Round 1:   gamma <~ Fr 
+
+        # WARN: challenge should be 32 bytes long, here we use 1 byte for debugging
+        gamma = Fr.from_bytes(tr.challenge_bytes(b"gamma", 1))
+
+        Ugamma = ec_mul(U, gamma)
+        P = a_cm + ec_mul(Ugamma, c)
+        PLR = []
+        rho = rho_a
+
+        def recursive_split_and_fold(G: list[G1Point], vec_a: list[Fr], vec_b: list[Fr], rho: Fr, P: G1Point) -> list[Fr]:
+            if len(vec_a) == 1:
+                assert len(vec_a) == len(vec_b) == len(G) == 1, "EROR: len(vec_a) and len(vec_b) should be 1"
+                a0 = vec_a[0]
+                b0 = vec_b[0]
+                G0 = G[0]
+
+                # Round 4:  R -> 
+                G_new = G0 + ec_mul(Ugamma, b0)
+                r, rho_r = Fr.rands(rng, 2)
+                R = ec_mul(G_new, r) + ec_mul(H, rho_r)
+                tr.append_message(b"R", str(R).encode())
+
+                # Round 5:  zeta <~ Fr
+                zeta = Fr.from_bytes(tr.challenge_bytes(b"zeta", 1))
+                zeta_star = Fr.rand(rng)
+
+                # Round 6:  z ->  
+                z = r + zeta * a0
+                
+                z_star = r + zeta_star * a0
+
+                extracted_vec_a = [(z - z_star) / (zeta - zeta_star)]
+            
+                return extracted_vec_a
+
+            half = len(vec_a) // 2
+            G1 = G[:half]
+            G2 = G[half:]
+            as1 = vec_a[:half]
+            as2 = vec_a[half:]
+            bs1 = vec_b[:half]
+            bs2 = vec_b[half:]
+            rho_L, rho_R = Fr.rands(rng, 2)
+
+            # Round 2:   PL, PR, ->
+            PL = self.pcs.commit_with_pp(G1, as2) + ec_mul(Ugamma, ipa(as2, bs1)) + ec_mul(H, rho_L)
+            PR = self.pcs.commit_with_pp(G2, as1) + ec_mul(Ugamma, ipa(as1, bs2)) + ec_mul(H, rho_R)
+            PLR.insert(0, (PL, PR))
+
+            tr.append_message(b"PL", str(PL).encode())
+            tr.append_message(b"PR", str(PR).encode())
+
+            # Round 3:   mu <~ Fr
+            mu = Fr.from_bytes(tr.challenge_bytes(b"mu", 1))
+            if debug:
+                print(f"prove> mu: {mu}")
+            vec_a = [as1[i] + as2[i] * mu for i in range(half)]
+            vec_b = [bs1[i] + bs2[i] * mu.inv() for i in range(half)]
+            rho += rho_L * mu + rho_R * mu.inv()
+            
+            G = [G1[i] + ec_mul(G2[i], mu.inv()) for i in range(half)]
+            
+            extracted_vec_a = recursive_split_and_fold(G, vec_a, vec_b, rho, P)
+            
+            mu_star = Fr.rand(rng)
+            vec_a = [as1[i] + as2[i] * mu_star for i in range(half)]
+            vec_b = [bs1[i] + bs2[i] * mu_star.inv() for i in range(half)]
+            rho += rho_L * mu_star + rho_R * mu_star.inv()
+            
+            G = [G1[i] + ec_mul(G2[i], mu_star.inv()) for i in range(half)]
+
+            extracted_vec_a_star = recursive_split_and_fold(G, vec_a, vec_b, rho, P)
+            
+            extracted_as2 = [(a - a_star) / (mu - mu_star) for a, a_star in zip(extracted_vec_a, extracted_vec_a_star)]
+            extracted_as1 = [(a * mu_star - a_star * mu) / (mu_star - mu) for a, a_star in zip(extracted_vec_a, extracted_vec_a_star)]
+            
+            return extracted_as1 + extracted_as2
+
+        return recursive_split_and_fold(G, vec_a, vec_b, rho, P)
 
     def inner_product_verify(self, a_cm: G1Point, vec_b: Fr, c: Fr, arg: IPA_Argument, tr: MerlinTranscript, debug=False) -> bool:
         """
@@ -289,6 +407,29 @@ class IPA_PCS:
         arg = self.inner_product_prove(f_cm, vec_x, y, coeffs, rho, tr, debug)
         return arg
 
+    def univariate_poly_eval_extract(self, \
+            f_cm: G1Point, x: Fr, y: Fr, coeffs: list[Fr], rho: Fr, tr: MerlinTranscript, debug=False) \
+            -> list[Fr]:
+        """
+        Extract the secret vec_c of f(x) = y.
+
+            f(X) = c0 + c1 * X + c2 * X^2 + ... + cn * X^n
+
+        Args:
+            f_cm: the commitment to the polynomial f(X)
+            x: the challenge point
+            y: the evaluation of f(x)
+            vec_c: the coeffcient vector of the polynomial f(X)
+            rho_c: the blinding factor for the commitment to vec_c
+            tr: the Merlin transcript to use for the proof
+            debug: whether to print debug information
+        Returns:
+            extracted_coeffs: the extracted coefficients of the polynomial f(X)
+        """
+        n = len(coeffs)
+        vec_x = [x**i for i in range(n)]
+        extracted_coeffs  = self.inner_product_extract(f_cm, vec_x, y, coeffs, rho, tr, debug)
+        return extracted_coeffs
         
     def univariate_poly_eval_verify(self, f_cm: G1Point, x: Fr, y: Fr, arg: IPA_Argument, tr: MerlinTranscript, debug=False) -> bool:
         """
@@ -382,6 +523,10 @@ def test_ipa_pcs():
     # verifier verifies the argument
     verified = ipa_pcs.univariate_poly_eval_verify(f_cm, x, y, arg, tr_verifier, debug=True)
     print(f"verified: {verified}")
+    
+    extracted_coeffs = ipa_pcs.univariate_poly_eval_extract(f_cm, x, y, coeffs, rho, tr_prover, debug=False)
+    assert coeffs == extracted_coeffs
+    print(f"extracted_coeffs: {extracted_coeffs}")
 
 if __name__ == "__main__":
     test_ipa_pcs()
